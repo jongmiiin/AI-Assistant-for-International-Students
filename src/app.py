@@ -117,22 +117,18 @@ def answer_fn(message: str, history: List[Dict], lang_mode: str, top_k: int, sho
     return reply
 
 def demo():
+    # 고정 설정값(원하면 여기서만 숫자 바꿔 쓰면 됨)
+    LANG = "Auto"   # "Auto" | "한국어" | "English" | "中文(简体)"
+    TOPK = 5        # 검색 개수
+    SHOW_SOURCES = True  # 출처/근거 표시 여부
     with gr.Blocks(fill_height=True) as app:
         gr.Markdown("""
         # JBNU International AI Assistant
-        외국인 유학생 비자 안내 RAG 챗봇 (한국어/English/中文(简体))
+        외국인 유학생 비자 안내 AI Agent 챗봇 (한국어/English/中文(简体))
         """)
-        with gr.Row():
-            lang_mode = gr.Dropdown(
-                choices=["Auto", "한국어", "English", "中文(简体)"],
-                value="Auto",
-                label="응답 언어 (Language)"
-            )
-            topk = gr.Slider(1, 8, value=5, step=1, label="검색 개수 (Top-K)")
-            show_sources = gr.Checkbox(value=True, label="출처/근거 표시")
 
         chat = gr.ChatInterface(
-            fn=lambda msg, hist: answer_fn(msg, hist, lang_mode.value, int(topk.value), bool(show_sources.value)),
+            fn=lambda msg, hist: answer_fn(msg, hist, LANG, TOPK, SHOW_SOURCES),
             title="JBNU Visa Assistant",
             undo_btn=None,
             retry_btn="Retry",
