@@ -36,35 +36,12 @@ CONTENT_SELECTORS = [
     ".bo_view", "#content", ".content", ".sub_content", ".subContent"
 ]
 
-# def extract_main_text(html: str) -> str:
-#     soup = BeautifulSoup(html, "html.parser")
-#     for s in soup(["script", "style", "noscript"]):
-#         s.extract()
-
-#     # 후보 선택자 중 텍스트가 가장 긴 컨테이너 선택
-#     best = None
-#     best_len = 0
-#     for sel in CONTENT_SELECTORS:
-#         for node in soup.select(sel):
-#             txt = node.get_text(separator=" ", strip=True)
-#             L = len(txt or "")
-#             if L > best_len:
-#                 best, best_len = txt, L
-
-#     text = (best or soup.get_text(separator=" ", strip=True) or "").strip()
-#     text = re.sub(r"\s+", " ", text)
-#     return text
 
 def extract_main_text(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     for s in soup(["script", "style", "noscript"]):
         s.extract()
 
-    # K2Web 패턴 우선
-    CONTENT_SELECTORS = [
-        ".board_view", ".view_cont", ".viewCont", ".article", ".boardDetail",
-        ".bo_view", "#content", ".content", ".sub_content", ".subContent"
-    ]
 
     best = None
     best_len = 0
@@ -78,10 +55,48 @@ def extract_main_text(html: str) -> str:
     text = re.sub(r"\s+", " ", text)
     return text
 
+def extract_title(html: str) -> str:
+    soup = BeautifulSoup(html, "html.parser")
+    candidates = [
+        "h1", "h2", ".tit", ".title", ".subject", ".board_view .title", ".view_tit"
+    ]
+    for sel in candidates:
+        node = soup.select_one(sel)
+        if node:
+            t = node.get_text(strip=True)
+            if t:
+                return t
+    return ""
+
+def is_same_domain(base: str, url: str) -> bool:
+    return url.startswith(base)
+
+def is_list_page(url: str) -> bool:
+    # 정확히 비자 목록(22303) 페이지만 허용
+    return "/ioffice/22303/" in url and "subview.do" in url
+
+def is_visa_detail(url: str) -> bool:
+    # 비자 게시판 상세 패턴: /bbs/ioffice/3549/**/artclView.do
+    if "/bbs/ioffice/3549/" in url and "artclView.do" in url:
+        return True
+    # 일부 상세는 subview.do?enc=... 로 열리기도 하므로 enc가 있으면 후보로 인정
+    if is_list_page(url) and "enc=" in url:
+        return True
+    return False
+
+def should_skip(url: str) -> bool:
+    # 첨부/다운로드, 타 게시판은 스킵
+    if "download.do" in url:
+        return True
+    # 타 보드(ex. 4303, 5310, 5154 등) 스킵
+    if "/bbs/ioffice/" in url and "/bbs/ioffice/3549/" not in url:
+        return True
+    return False
 
 def scrape(start_url: str, out_dir_raw: str, out_dir_clean: str,
-           max_pages: int = 200, delay_sec: float = 1.0, ignore_robots: bool = False):
+           max_pages: int = 120, delay_sec: float = 1.0, ignore_robots: bool = False):
     ensure_dir(out_dir_raw); ensure_dir(out_dir_clean)
+    
     visited = set()
     to_visit = [start_url]
     records = []
@@ -91,20 +106,23 @@ def scrape(start_url: str, out_dir_raw: str, out_dir_clean: str,
     pages = 0
     while to_visit and pages < max_pages:
         url = to_visit.pop(0)
+
         if url in visited:
             continue
         visited.add(url)
 
-        # 같은 도메인만
-        if not url.startswith(base):
+        if not is_same_domain(base, url):
             continue
-
         if not allowed_by_robots(base, url, ignore_robots=ignore_robots):
             print(f"[SKIP robots] {url}")
             continue
+        if should_skip(url):
+            # 첨부/타 보드 배제
+            # print(f"[SKIP non-visa/attach] {url}")
+            continue
 
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp = requests.get(url, headers=HEADERS, timeout=15, allow_redirects=True)
             if resp.status_code != 200 or not resp.text:
                 print(f"[WARN] status={resp.status_code} url={url}")
                 continue
@@ -115,25 +133,24 @@ def scrape(start_url: str, out_dir_raw: str, out_dir_clean: str,
         pages += 1
         html = resp.text
 
-        # 저장(원문 HTML)
-        fname = f"page_{pages:04d}.html"
-        with open(os.path.join(out_dir_raw, fname), "w", encoding="utf-8") as f:
-            f.write(html)
-
+        # 저장(원문 HTML) — 필요 없다면 주석 처리 가능
+        raw_name = f"page_{pages:04d}.html"
+        try:
+            with open(os.path.join(out_dir_raw, raw_name), "w", encoding="utf-8") as f:
+                f.write(html)
+        except Exception:
+            # 경로/인코딩 문제 등은 무시하고 진행
+            pass
+        
+        # 본문 텍스트/제목 추출
+        title = extract_title(html)
         text = extract_main_text(html)
 
-        # 비자 관련 키워드가 포함된 페이지만 보존
-        if any(k in text for k in ["비자", "VISA", "출입국", "체류", "외국인", "유학생", "외국인등록", "visa", "Visa"]):
-            # 제목 추출 (일반적인 패턴)
-            title = ""
-            h = None
-            for sel in ["h1", "h2", ".tit", ".title", ".subject"]:
-                h = BeautifulSoup(html, "html.parser").select_one(sel)
-                if h and h.get_text(strip=True):
-                    title = h.get_text(strip=True)
-                    break
-
-            records.append({"url": url, "title": title, "text": text})
+        # 상세 페이지만 저장(목록은 제외). 단, subview.do?enc=...은 상세로 취급
+        if is_visa_detail(url):
+            # 너무 짧은 텍스트(메뉴/빈 페이지)는 제외
+            if len(text) >= 200:
+                records.append({"url": url, "title": title, "text": text})
 
         # -------- 링크 수집 로직: 상세글/목록/페이지네이션 모두 추적 --------
         soup = BeautifulSoup(html, "html.parser")
@@ -142,20 +159,22 @@ def scrape(start_url: str, out_dir_raw: str, out_dir_clean: str,
             next_url = urljoin(url, href)
 
             # 같은 도메인만
-            if not next_url.startswith(base):
+            if not is_same_domain(base, next_url):
+                continue
+            if should_skip(next_url):
                 continue
 
-            # (1) 해당 게시판 메인/페이지네이션
-            if ("/ioffice/22303/" in next_url) or ("subview.do" in next_url):
+            # (A) 정확히 이 목록(22303)만 계속 탐색
+            if is_list_page(next_url):
                 if next_url not in visited:
                     to_visit.append(next_url)
-                    continue
+                continue
 
-            # (2) 상세 글(핵심): /bbs/ioffice/.../artclView.do
-            if ("/bbs/ioffice/" in next_url) or ("artclView.do" in next_url):
+            # (B) 비자 상세만!
+            if is_visa_detail(next_url):
                 if next_url not in visited:
                     to_visit.append(next_url)
-                    continue
+                continue
 
         print(f"[OK] {url}  (queued={len(to_visit)})")
         time.sleep(delay_sec)
@@ -166,7 +185,7 @@ def scrape(start_url: str, out_dir_raw: str, out_dir_clean: str,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--start-url", type=str, required=True, help="시작 URL (예: https://ioffice.jbnu.ac.kr/ioffice/22303/subview.do)")
-    parser.add_argument("--max-pages", type=int, default=200)
+    parser.add_argument("--max-pages", type=int, default=120)
     parser.add_argument("--delay", type=float, default=1.0)
     parser.add_argument("--ignore-robots", action="store_true", help="robots.txt 확인을 건너뜁니다(서버가 robots 접근을 막는 경우 유용)")
     args = parser.parse_args()

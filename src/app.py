@@ -55,7 +55,20 @@ def search(q: str, top_k: int = 5) -> List[Dict]:
         })
     return results
 
-SYSTEM_PROMPT = ("당신은 전북대학교(JBNU) 외국인 유학생 비자 어시스턴트입니다. ""오직 제공된 컨텍스트(공지 텍스트)만 사용해 답변하세요. ""컨텍스트에 없는 내용은 추측하지 말고 '해당 내용은 공식 공지에서 확인되지 않습니다'라고 말하세요. ""가능하면 간단한 단계별 안내와 함께 출처(URL)를 [1], [2] 형태로 명시하세요. ""사용자 질문의 언어로 답변하세요. 한국어/영어/중국어(간체)를 지원합니다.")
+
+SYSTEM_PROMPT = (
+    "You are an AI assistant for international students at Jeonbuk National University (JBNU), "
+    "specialized in visa-related guidance. "
+    "Answer ONLY based on the provided context (official notices). "
+    "If the information is not present in the context, respond with: "
+    "'The information is not found in the official notice.' "
+    "Whenever possible, provide a simple step-by-step guide and cite the source URL. "
+    "Always respond in the same language as the user's question. "
+    "Supported languages: Korean, English, Simplified Chinese. "
+    "For example, if the question is in Korean, answer in Korean; "
+    "if the question is in English, answer in English; "
+    "if the question is in Chinese, answer in Chinese."
+)
 
 def build_context(snippets: List[Dict]) -> Tuple[str, List[str]]:
     ctx = []
@@ -75,7 +88,13 @@ def pick_disclaimer(lang_tag: str) -> str:
         return DISCLAIMER_ZH
     return DISCLAIMER_EN
 
-def answer_fn(message: str, history: List[Dict], lang_mode: str, top_k: int, show_sources: bool):
+def answer_fn(
+    message: str,
+    history: List[Dict],
+    lang_mode: str = "Auto",
+    top_k: int = 5,
+    show_sources: bool = False,
+):
     # 검색
     snippets = search(message, top_k=top_k)
     context, urls = build_context(snippets)
@@ -87,55 +106,109 @@ def answer_fn(message: str, history: List[Dict], lang_mode: str, top_k: int, sho
         except Exception:
             qlang = "en"
     else:
-        qlang = {"한국어": "ko", "English": "en", "中文(简体)": "zh"}.get(lang_mode, "en")
+        qlang = {"한국어": "ko", "English": "en", "中文(简体)": "zh-cn"}.get(lang_mode, "en")
+
+
+    LANG_LABEL = {"ko": "Korean", "en": "English", "zh-cn": "Simplified Chinese"}
+    LANG_HARD_RULE = {
+        "ko": "항상 한국어로만 답하세요. 다른 언어를 섞지 마세요.",
+        "en": "Always answer in English only. Do not include any other language.",
+        "zh-cn": "请始终只使用简体中文回答，不要使用其他语言。"
+    }
+    lang_system = (
+        f"Output language: {LANG_LABEL[qlang]}. "
+        f"{LANG_HARD_RULE[qlang]} "
+        "If the sources are in a different language, translate faithfully into the output language."
+    )
 
     # 모델 질의
     user_instruction = (
-        f"질문: {message}\n\n"
-        f"컨텍스트:\n{context}\n\n"
-        "위 컨텍스트로만 답변하세요. 근거가 없으면 모른다고 하세요. "
-        "마지막에 출처 인덱스([1], [2]...)를 포함하세요."
+        f"[Answer Language: {LANG_LABEL[qlang]}]\n"
+        f"Question: {message}\n\n"
+        f"Context (use ONLY this):\n{context}\n\n"
+        "Answer only based on the provided context. If the context does not contain the information, say 'I do not know.' "
+        "Include the source(s) at the end of your answer."
     )
 
-    completion = client.chat.completions.create(
+    stream = client.chat.completions.create(
         model=MODEL_NAME,
         temperature=0.2,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": lang_system},
             {"role": "user", "content": user_instruction},
         ],
-    )
-    reply = completion.choices[0].message.content
+        stream=True,
+    )    
+    
+    collected = ""
+    for chunk in stream:
+        delta = getattr(chunk.choices[0], "delta", None)
+        token = getattr(delta, "content", None) if delta else None
 
-    # 디스클레이머 및 출처 표시
+        if token:
+            collected += token
+            # Gradio가 토큰을 바로 표시
+            yield collected
+
+    # 끝나고 disclaimer, sources 추가
     disclaimer = pick_disclaimer(pick_language_tag(qlang))
     if show_sources:
         src_block = "\n".join([f"[{i+1}] {u}" for i, u in enumerate(urls)])
-        reply = f"{reply}\n\n{disclaimer}\n\n{src_block}"
+        collected += f"\n\n{disclaimer}\n\n{src_block}"
     else:
-        reply = f"{reply}\n\n{disclaimer}"
-    return reply
+        collected += f"\n\n{disclaimer}"
+
+    return collected
+
+    
 
 def demo():
-    with gr.Blocks(fill_height=True) as app:
+    # 고정 설정값(원하면 여기서만 숫자 바꿔 쓰면 됨)
+    LANG = "Auto"   # "Auto" | "한국어" | "English" | "中文(简体)"
+    TOPK = 5        # 검색 개수
+    SHOW_SOURCES = False  # 출처/근거 표시 여부
+
+    theme = gr.themes.Soft(primary_hue="orange", neutral_hue="slate")
+    with gr.Blocks(
+        theme=theme,
+        fill_height=True,
+        css="""
+        .gradio-container { max-width: 980px !important; margin: 0 auto; }
+        .hero { text-align:center; padding: 8px 0 4px; }
+        .hero h1 { font-size: 28px; line-height: 1.2; margin: 0; }
+        .hero p { color: #64748b; margin: .35rem 0 0; }
+        """
+    ) as app:
+        # 히어로 헤더(브랜딩은 여기서만!)
         gr.Markdown("""
-        # JBNU International AI Assistant
-        외국인 유학생 비자 안내 RAG 챗봇 (한국어/English/中文(简体))
+        <div class="hero">
+          <h1>JBNU AI Assistant for International Student</h1>
+          <p>외국인 유학생 안내 AI Assistant 챗봇 · 한국어 / English / 中文(简体)</p>
+        </div>
         """)
-        with gr.Row():
-            lang_mode = gr.Dropdown(
-                choices=["Auto", "한국어", "English", "中文(简体)"],
-                value="Auto",
-                label="응답 언어 (Language)"
-            )
-            topk = gr.Slider(1, 8, value=5, step=1, label="검색 개수 (Top-K)")
-            show_sources = gr.Checkbox(value=True, label="출처/근거 표시")
-        topk = gr.Slider(1, 8, value=5, step=1, label="검색 개수 (Top-K)")
-        show_sources = gr.Checkbox(value=True, label="출처/근거 표시")
 
         chat = gr.ChatInterface(
-            fn=lambda msg, hist: answer_fn(msg, hist, lang_mode.value, int(topk.value), bool(show_sources.value)),
-            title="JBNU Visa Assistant",
+            fn=answer_fn,
+            title=None,
+            chatbot=gr.Chatbot(
+                height=450,
+                show_label=False,
+                bubble_full_width=False,
+                value=[
+                    (
+                        None,  # 왼쪽(사용자 발화 없음)
+                        """안녕하세요! 👋 JBNU AI Assistant입니다.  
+                        궁금한 점을 입력하면 공식 공지에 기반해 안내해 드립니다.  
+
+                        Hello! 👋 This is the JBNU AI Assistant.  
+                        Ask me anything, and I will guide you based on official notices.  
+
+                        你好！👋 我是全北大学 AI 助手。  
+                        请输入您的问题，我会根据官方公告为您解答。"""
+                    )
+                ]
+            ),
             undo_btn=None,
             retry_btn="Retry",
             clear_btn="Clear",
@@ -150,4 +223,4 @@ def demo():
 
 if __name__ == "__main__":
     app = demo()
-    app.queue().launch()
+    app.queue().launch(share=True)
