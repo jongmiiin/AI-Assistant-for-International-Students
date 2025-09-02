@@ -55,11 +55,20 @@ def search(q: str, top_k: int = 5) -> List[Dict]:
         })
     return results
 
-SYSTEM_PROMPT = ("당신은 전북대학교(JBNU) 외국인 유학생 비자 어시스턴트입니다. "
-                 "오직 제공된 컨텍스트(공지 텍스트)만 사용해 답변하세요. "
-                 "컨텍스트에 없는 내용은 추측하지 말고 '해당 내용은 공식 공지에서 확인되지 않습니다'라고 말하세요. "
-                 "가능하면 간단한 단계별 안내와 함께 출처(URL)를 명시하세요. "
-                 "사용자 질문의 언어로 답변하세요. 한국어/영어/중국어(간체)를 지원합니다.")
+
+SYSTEM_PROMPT = (
+    "You are an AI assistant for international students at Jeonbuk National University (JBNU), "
+    "specialized in visa-related guidance. "
+    "Answer ONLY based on the provided context (official notices). "
+    "If the information is not present in the context, respond with: "
+    "'The information is not found in the official notice.' "
+    "Whenever possible, provide a simple step-by-step guide and cite the source URL. "
+    "Always respond in the same language as the user's question. "
+    "Supported languages: Korean, English, Simplified Chinese. "
+    "For example, if the question is in Korean, answer in Korean; "
+    "if the question is in English, answer in English; "
+    "if the question is in Chinese, answer in Chinese."
+)
 
 def build_context(snippets: List[Dict]) -> Tuple[str, List[str]]:
     ctx = []
@@ -91,15 +100,28 @@ def answer_fn(message: str, history: List[Dict], lang_mode: str, top_k: int, sho
         except Exception:
             qlang = "en"
     else:
-        qlang = {"한국어": "ko", "English": "en", "中文(简体)": "zh"}.get(lang_mode, "en")
+        qlang = {"한국어": "ko", "English": "en", "中文(简体)": "zh-cn"}.get(lang_mode, "en")
+
+
+    LANG_LABEL = {"ko": "Korean", "en": "English", "zh-cn": "Simplified Chinese"}
+    LANG_HARD_RULE = {
+        "ko": "항상 한국어로만 답하세요. 다른 언어를 섞지 마세요.",
+        "en": "Always answer in English only. Do not include any other language.",
+        "zh-cn": "请始终只使用简体中文回答，不要使用其他语言。"
+    }
+    lang_system = (
+        f"Output language: {LANG_LABEL[qlang]}. "
+        f"{LANG_HARD_RULE[qlang]} "
+        "If the sources are in a different language, translate faithfully into the output language."
+    )
 
     # 모델 질의
     user_instruction = (
-        f"질문: {message}\n\n"
-        f"컨텍스트:\n{context}\n\n"
-        "위 컨텍스트로만 답변하세요. 근거가 없으면 모른다고 하세요. "
-        # "마지막에 출처 인덱스([1], [2]...)를 포함하세요."
-        "마지막에 출처를 포함하세요."
+        f"[Answer Language: {LANG_LABEL[qlang]}]\n"
+        f"Question: {message}\n\n"
+        f"Context (use ONLY this):\n{context}\n\n"
+        "Answer only based on the provided context. If the context does not contain the information, say 'I do not know.' "
+        "Include the source(s) at the end of your answer."
     )
 
     completion = client.chat.completions.create(
@@ -107,6 +129,7 @@ def answer_fn(message: str, history: List[Dict], lang_mode: str, top_k: int, sho
         temperature=0.2,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": lang_system},
             {"role": "user", "content": user_instruction},
         ],
         # stream=True,
@@ -143,7 +166,7 @@ def demo():
         gr.Markdown("""
         <div class="hero">
           <h1>JBNU International AI Assistant</h1>
-          <p>외국인 유학생 비자 안내 AI Agent 챗봇 · 한국어 / English / 中文(简体)</p>
+          <p>외국인 유학생 안내 AI Agent 챗봇 · 한국어 / English / 中文(简体)</p>
         </div>
         """)
 
