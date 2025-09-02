@@ -1,28 +1,28 @@
-# JBNU Visa Assistant (RAG + Gradio)
+# JBNU International AI Assistant
 
-외국인 유학생의 비자(VISA) 관련 업무를 다국어(한국어/영어/중국어)로 안내하는 RAG 챗봇입니다.
+외국인 유학생의 비자(VISA) 관련 업무를 다국어(한국어/영어/중국어)로 안내하는 AI Agent 챗봇입니다.
 - 소스: 전북대학교 국제교류 관련 공지 (예: https://ioffice.jbnu.ac.kr/ioffice/22303/subview.do)
 - UI: Gradio
 - 모델: OpenAI GPT (기본 `gpt-4o-mini`), 멀티링궐 임베딩(`intfloat/multilingual-e5-base`)
-- 스토어: FAISS
+- RAG: FAISS
 
 
 ## 빠른 시작
 
 1) 압축 해제 후 가상환경 생성 및 설치
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # (Windows) .venv\Scripts\activate
+conda create -n myenv python=3.11
+conda activate myenv
 pip install -r requirements.txt
 ```
 
 2) 환경변수 설정 (`.env` 파일 생성)
-```
+```bash
 OPENAI_API_KEY=YOUR_KEY_HERE
 MODEL_NAME=gpt-4o-mini
 ```
 
-3) (선택) 스크래핑: 비자 관련 공지 수집
+3) 스크래핑: 비자 등 관련 공지 수집
 ```bash
 python src/scraper.py   --start-url https://ioffice.jbnu.ac.kr/ioffice/22303/subview.do   --max-pages 150
 ```
