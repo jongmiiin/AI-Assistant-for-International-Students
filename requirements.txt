@@ -1,0 +1,14 @@
+# Core app
+gradio>=4.29.0
+openai>=1.30.0
+python-dotenv>=1.0.1
+
+# Scraping
+requests>=2.32.3
+beautifulsoup4>=4.12.3
+urllib3>=2.2.2
+
+# RAG
+faiss-cpu>=1.8.0.post1
+sentence-transformers>=2.7.0
+langdetect>=1.0.9
