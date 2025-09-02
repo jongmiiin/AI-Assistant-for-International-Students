@@ -88,7 +88,14 @@ def pick_disclaimer(lang_tag: str) -> str:
         return DISCLAIMER_ZH
     return DISCLAIMER_EN
 
-def answer_fn(message: str, history: List[Dict], lang_mode: str, top_k: int, show_sources: bool):
+# def answer_fn(message: str, history: List[Dict], lang_mode: str, top_k: int, show_sources: bool):
+def answer_fn(
+    message: str,
+    history: List[Dict],
+    lang_mode: str = "Auto",
+    top_k: int = 5,
+    show_sources: bool = False,
+):
     # 검색
     snippets = search(message, top_k=top_k)
     context, urls = build_context(snippets)
@@ -124,7 +131,28 @@ def answer_fn(message: str, history: List[Dict], lang_mode: str, top_k: int, sho
         "Include the source(s) at the end of your answer."
     )
 
-    completion = client.chat.completions.create(
+    # completion = client.chat.completions.create(
+    #     model=MODEL_NAME,
+    #     temperature=0.2,
+    #     messages=[
+    #         {"role": "system", "content": SYSTEM_PROMPT},
+    #         {"role": "system", "content": lang_system},
+    #         {"role": "user", "content": user_instruction},
+    #     ],
+    #     # stream=True,
+    # )
+    # reply = completion.choices[0].message.content
+
+    # # 디스클레이머 및 출처 표시
+    # disclaimer = pick_disclaimer(pick_language_tag(qlang))
+    # if show_sources:
+    #     src_block = "\n".join([f"[{i+1}] {u}" for i, u in enumerate(urls)])
+    #     reply = f"{reply}\n\n{disclaimer}\n\n{src_block}"
+    # else:
+    #     reply = f"{reply}\n\n{disclaimer}"
+    # return reply
+
+    stream = client.chat.completions.create(
         model=MODEL_NAME,
         temperature=0.2,
         messages=[
@@ -132,18 +160,39 @@ def answer_fn(message: str, history: List[Dict], lang_mode: str, top_k: int, sho
             {"role": "system", "content": lang_system},
             {"role": "user", "content": user_instruction},
         ],
-        # stream=True,
-    )
-    reply = completion.choices[0].message.content
+        stream=True,
+    )    
+    
+    collected = ""
+    for chunk in stream:
+        # 스트림 청크에서 delta.content만 추출
+        # try:
+        #     # delta = chunk.choices[0].delta
+        #     # token = getattr(delta, "content", None)
+        #     delta = getattr(chunk.choices[0], "delta", None)
+        #     token = getattr(delta, "content", None) if delta else None
+        # except Exception:
+        #     token = None
+        delta = getattr(chunk.choices[0], "delta", None)
+        token = getattr(delta, "content", None) if delta else None
 
-    # 디스클레이머 및 출처 표시
+        if token:
+            # collected.append(token)
+            collected += token
+            # Gradio가 토큰을 바로 표시
+            yield collected
+
+    # 끝나고 disclaimer, sources 추가
     disclaimer = pick_disclaimer(pick_language_tag(qlang))
     if show_sources:
         src_block = "\n".join([f"[{i+1}] {u}" for i, u in enumerate(urls)])
-        reply = f"{reply}\n\n{disclaimer}\n\n{src_block}"
+        collected += f"\n\n{disclaimer}\n\n{src_block}"
     else:
-        reply = f"{reply}\n\n{disclaimer}"
-    return reply
+        collected += f"\n\n{disclaimer}"
+
+    return collected
+
+    
 
 def demo():
     # 고정 설정값(원하면 여기서만 숫자 바꿔 쓰면 됨)
@@ -171,7 +220,8 @@ def demo():
         """)
 
         chat = gr.ChatInterface(
-            fn=lambda msg, hist: answer_fn(msg, hist, LANG, TOPK, SHOW_SOURCES),
+            # fn=lambda msg, hist: answer_fn(msg, hist, LANG, TOPK, SHOW_SOURCES),
+            fn=answer_fn,
             title=None,
             chatbot=gr.Chatbot(height=450, show_label=False, bubble_full_width=False),
             undo_btn=None,
@@ -188,4 +238,4 @@ def demo():
 
 if __name__ == "__main__":
     app = demo()
-    app.queue().launch()
+    app.queue().launch(share=True)
