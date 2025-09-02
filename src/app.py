@@ -88,7 +88,6 @@ def pick_disclaimer(lang_tag: str) -> str:
         return DISCLAIMER_ZH
     return DISCLAIMER_EN
 
-# def answer_fn(message: str, history: List[Dict], lang_mode: str, top_k: int, show_sources: bool):
 def answer_fn(
     message: str,
     history: List[Dict],
@@ -131,27 +130,6 @@ def answer_fn(
         "Include the source(s) at the end of your answer."
     )
 
-    # completion = client.chat.completions.create(
-    #     model=MODEL_NAME,
-    #     temperature=0.2,
-    #     messages=[
-    #         {"role": "system", "content": SYSTEM_PROMPT},
-    #         {"role": "system", "content": lang_system},
-    #         {"role": "user", "content": user_instruction},
-    #     ],
-    #     # stream=True,
-    # )
-    # reply = completion.choices[0].message.content
-
-    # # 디스클레이머 및 출처 표시
-    # disclaimer = pick_disclaimer(pick_language_tag(qlang))
-    # if show_sources:
-    #     src_block = "\n".join([f"[{i+1}] {u}" for i, u in enumerate(urls)])
-    #     reply = f"{reply}\n\n{disclaimer}\n\n{src_block}"
-    # else:
-    #     reply = f"{reply}\n\n{disclaimer}"
-    # return reply
-
     stream = client.chat.completions.create(
         model=MODEL_NAME,
         temperature=0.2,
@@ -165,19 +143,10 @@ def answer_fn(
     
     collected = ""
     for chunk in stream:
-        # 스트림 청크에서 delta.content만 추출
-        # try:
-        #     # delta = chunk.choices[0].delta
-        #     # token = getattr(delta, "content", None)
-        #     delta = getattr(chunk.choices[0], "delta", None)
-        #     token = getattr(delta, "content", None) if delta else None
-        # except Exception:
-        #     token = None
         delta = getattr(chunk.choices[0], "delta", None)
         token = getattr(delta, "content", None) if delta else None
 
         if token:
-            # collected.append(token)
             collected += token
             # Gradio가 토큰을 바로 표시
             yield collected
@@ -214,16 +183,32 @@ def demo():
         # 히어로 헤더(브랜딩은 여기서만!)
         gr.Markdown("""
         <div class="hero">
-          <h1>JBNU International AI Assistant</h1>
-          <p>외국인 유학생 안내 AI Agent 챗봇 · 한국어 / English / 中文(简体)</p>
+          <h1>JBNU AI Assistant for International Student</h1>
+          <p>외국인 유학생 안내 AI Assistant 챗봇 · 한국어 / English / 中文(简体)</p>
         </div>
         """)
 
         chat = gr.ChatInterface(
-            # fn=lambda msg, hist: answer_fn(msg, hist, LANG, TOPK, SHOW_SOURCES),
             fn=answer_fn,
             title=None,
-            chatbot=gr.Chatbot(height=450, show_label=False, bubble_full_width=False),
+            chatbot=gr.Chatbot(
+                height=450,
+                show_label=False,
+                bubble_full_width=False,
+                value=[
+                    (
+                        None,  # 왼쪽(사용자 발화 없음)
+                        """안녕하세요! 👋 JBNU AI Assistant입니다.  
+                        궁금한 점을 입력하면 공식 공지에 기반해 안내해 드립니다.  
+
+                        Hello! 👋 This is the JBNU AI Assistant.  
+                        Ask me anything, and I will guide you based on official notices.  
+
+                        你好！👋 我是全北大学 AI 助手。  
+                        请输入您的问题，我会根据官方公告为您解答。"""
+                    )
+                ]
+            ),
             undo_btn=None,
             retry_btn="Retry",
             clear_btn="Clear",
