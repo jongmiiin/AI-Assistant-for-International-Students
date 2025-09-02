@@ -130,8 +130,6 @@ def demo():
             )
             topk = gr.Slider(1, 8, value=5, step=1, label="검색 개수 (Top-K)")
             show_sources = gr.Checkbox(value=True, label="출처/근거 표시")
-        topk = gr.Slider(1, 8, value=5, step=1, label="검색 개수 (Top-K)")
-        show_sources = gr.Checkbox(value=True, label="출처/근거 표시")
 
         chat = gr.ChatInterface(
             fn=lambda msg, hist: answer_fn(msg, hist, lang_mode.value, int(topk.value), bool(show_sources.value)),
